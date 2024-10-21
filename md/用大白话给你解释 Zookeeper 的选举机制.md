@@ -1,10 +1,6 @@
 > 本文由 [简悦 SimpRead](http://ksria.com/simpread/) 转码， 原文地址 [mp.weixin.qq.com](https://mp.weixin.qq.com/s?__biz=MzU0OTk3ODQ3Ng==&mid=2247490552&idx=1&sn=c8666791054ba7adfac6af2bd338965a&chksm=fba6f3fbccd17aed0c519bf00eb29ba846cdbc983723cada94244abc48a6864b721e211e284b&scene=0&xtrack=1&key=dcf73b7f1e6b1d920b623a7f67cefb31a6f4e11eece456551262ce8cae7a6b65378714c7782afb860a81392f4e76cd896c14567d75a4eeb6b5423eba27f6f7cf80d0ca41d7d172ea4749e3b30d1500968c96c63a2b801327d97507aaab332017fcac849b8448e53fa0d7e38ea3327d515572fc064afdba047717b63eacdc80b1&ascene=1&uin=NzI1NTIwNTYy&devicetype=Windows+XP&version=62060841&lang=zh_CN&exportkey=AY7XXeJIqm%2BKmptJISfg0yc%3D&pass_ticket=Jrj%2BPnSMTW0EH%2B2SwRZrZONOOfYyJsitqg6n33ReFpXobmBB%2FweL%2FP3Fi4vGV21o&wx_header=0)
 
-![](https://mmbiz.qpic.cn/mmbiz_jpg/1J6IbIcPCLb7MHbaKYsNHHcVdjevwsrBeAPfQjibq8v9od4L7YYzVkjb8bxznjicicFMt1yniaHXohjfHlReqpCCZw/640?wx_fmt=jpeg)  
 
-我的新课《C2C 电商系统微服务架构 120 天实战训练营》在公众号**儒猿技术窝**上线了，感兴趣的同学，可以长按扫描下方二维码了解课程详情：  
-
-**课程大纲请参见文末**
 
 ![](https://mmbiz.qpic.cn/mmbiz_png/1J6IbIcPCLalNxFCJnahictuASd7C1OhpE2bnqmlKyUoywicicHV7f2kq7BOib4pRucD8I0ribKlbwhpibmRPiboZLbyA/640?wx_fmt=png)
 
@@ -207,17 +203,3 @@ Zookeeper 的选举原理和人类选举的逻辑类似，套用一下人类选�
 （4）在运行期选举还可能会遇到脑裂的情况，大家可以自行学习。
 
 **END**
-
-_征稿：愿意技术分享的朋友，欢迎投稿，每篇文章提供 800 ~ 1000 元的稿酬_
-
-_投稿请扫描下方二维码，添加微信：jeversoncui_
-
-![](https://mmbiz.qpic.cn/mmbiz_png/1J6IbIcPCLYaic2t7ffxHnTn6Hc80Jwic9w5icKWNV39kwKHKNshVogm0Korja8ae6Gw5eKxs21ntcxcJIcGBkUSw/640?wx_fmt=png)
-
-![](https://mmbiz.qpic.cn/mmbiz_jpg/1J6IbIcPCLalNxFCJnahictuASd7C1Ohpd4jq2icWvJ4NGzoQcMqUmRvucyLsSywGL6EjSrbgj3K0WKER6GO1Wpw/640?wx_fmt=jpeg)
-
-![](https://mmbiz.qpic.cn/mmbiz_jpg/1J6IbIcPCLalNxFCJnahictuASd7C1OhpVuVdHMoGUheKboJzzR5hA521UENuWGP1SUWBibLeX4l1rbcia6KA8ZJQ/640?wx_fmt=jpeg)
-
-![](https://mmbiz.qpic.cn/mmbiz_jpg/1J6IbIcPCLalNxFCJnahictuASd7C1Ohp2jQ29ggD0BOywydLqNiaLzmIKOkQB9vM5qSFjyMlWN7V5nz4PhnibGCA/640?wx_fmt=jpeg)
-
-![](https://mmbiz.qpic.cn/mmbiz_jpg/1J6IbIcPCLalNxFCJnahictuASd7C1Ohp60CmiausZrL5nNBYeeX6zRh1wux0D5TjicdCr2Urib7YWCUPRcx6mMqKg/640?wx_fmt=jpeg)
