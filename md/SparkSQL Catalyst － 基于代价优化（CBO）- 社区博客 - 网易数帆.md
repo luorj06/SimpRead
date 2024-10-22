@@ -1,0 +1,153 @@
+> 本文由 [简悦 SimpRead](http://ksria.com/simpread/) 转码， 原文地址 [sq.sf.163.com](https://sq.sf.163.com/blog/article/178255009191530496)
+
+> CBO 基本原理
+
+**CBO 基本原理**  
+
+文章《
+
+[瞄一眼，带你走进 SparkSQL 的世界](https://sq.163yun.com/blog/article/178698247892459520)
+
+》主要讲解了 SparkSQL 优化器核心组件 - Catalyst 的整个工作流程，重点说明了基于规则的优化策略（CRO）。CRO 是一种经验式、启发式的优化思路，优化规则都已经预先定义好，只需要将 SQL 往这些规则上套就可以。 说白了，CRO 就像是一个经验丰富的老司机，基本套路全都知道 。
+
+然而世界上有一种东西叫做 - 不按套路来，与其说它不按套路来，倒不如说它本身就没有什么套路而言。最典型的莫过于复杂 Join 算子，对于这些复杂的 Join 来说，通常有两个对优化相当重要的问题需要决定：  
+
+1. 该 Join 应该选择哪种策略来执行？BroadcastJoin or ShuffleHashJoin or SortMergeJoin？不同的执行策略对系统的资源要求不同，执行效率也有天壤之别，同一个 SQL，选择到合适的策略执行可能只需要几秒钟，而如果没有选择到合适的执行策略就可能会导致系统 OOM。
+
+2. 对于雪花模型或者星型模型来讲，多表 Join 应该选择什么样的顺序执行？不同的 Join 顺序意味着不同的执行效率，比如 A join B join C，A、B 表都很大，C 表很小，那 A join B 很显然需要大量的系统资源来运算，执行时间肯定不会短。而如果使用 A join C join B 的执行顺序，因为 C 表很小，所以 A join C 会很快得到结果，而且结果集会很小，再使用小的结果集 join B，结果必然也会很小。
+
+首先来看第一个问题，当前 SparkSQL 会让用户指定参数'spark.sql.autoBroadcastJoinThreshold’来决定是否采用 BroadcastJoin 策略，简单来说，它会选择参与 Join 的两表中的小表大小与该值进行对比，如果小表大小小于该配置值，就将此表进行广播；否则采用 SortMergeJoin 策略。对于 SparkSQL 采取的方式，有两个问题需要深入分析：
+
+*   参数'spark.sql.autoBroadcastJoinThreshold’指定的是表的大小（size），而不是条数。这样完全合理吗？我们知道 Join 算子会将两表中具有相同 key 的记录合并在一起，因此 Join 的复杂度只与两表的数据条数有关，而与表大小（size）没有直接的关系。这样一想，其实参数'spark.sql.autoBroadcastJoinThreshold’应该更多地是考虑广播的代价，而不是 Join 本身的代价。  
+    
+*   之前 Catalyst 文章中我们讲到谓词下推规则，Catalyst 会将很多过滤条件下推到 Join 之前，因此参与 Join 的两表大小并不应该是两张原始表的大小，而是经过过滤后的表数据大小。因此，单纯的知道原始表大小还远远不够，Join 优化还需要评估过滤后表数据大小以及表数据条数。
+
+对于第二个问题，也面临和第一个问题同样的两点缺陷，举个简单的例子：
+
+*   SQL：select * from A , B , C where A.id = B.b_id and A.id = C.c_id and C.c_id > 100  
+    
+*   假设：A、B、C 总纪录大小分别是 100m，40m，60m，C.c_id > 100 过滤后 C 的总纪录数会降到 10m
+
+上述 SQL 是一个典型的 A join B join C 的多 Join 示例，很显然，A 肯定在最前面，现在问题是 B 和 C 的 Join 顺序，是 A join B join C 还是 A join C join B。对于上面的示例，优化器会有两种最基本的选择，第一就是按照用户手写的 Join 顺序执行，即按照‘A.id = B.b_id and A.id = C.c_id ’顺序， 得到的执行顺序是 A join B join C。第二是按照 A、B 、C 三表的原始大小进行组织排序，原始表小的先 Join，原始表大的后 Join，适用这种规则得到的顺序依然是 A join B join C，因为 B 的记录大小小于 C 的记录大小。
+
+同样的道理，第一个缺陷很明显，记录大小并不能精确作为 Join 代价的计算依据，而应该是记录条数。第二就是对于过滤条件的忽略，上述示例中 C 经过过滤后的大小降到 10m，明显小于 B 的 40m，因此实际上应该执行的顺序为 A join C join B，与上述得到的结果刚好相反。
+
+可见，基于规则的优化策略并不适合复杂 Join 的优化，此时就需要另一种优化策略 - 基于代价优化（CBO）。基于代价优化策略实际只做两件事，就是解决上文中提到的两个问题：
+
+1.  解决参与 Join 的数据表大小并不能完全作为计算 Join 代价依据的问题，而应该加入数据记录条数这个维度  
+    
+2.  解决 Join 代价计算应该考虑谓词下推（等）条件的影响，不能仅仅关注原始表的大小。这个问题看似简单，实际上很复杂，需要优化器将逻辑执行计划树上的每一个节点的 <数据量，数据条数> 都评估出来，这样的话，评估 Join 的执行策略、执行顺序就不再以原始表大小作为依据，而是真实参与 Join 的两个数据集的大小条数作为依据。
+
+**CBO 实现思路**
+
+经过上文的解释，可以明确 CBO 的本质就是计算 LogionPlan 每个节点的输出数据大小与数据条数，作为复杂 Join 算子的代价计算依据。逻辑执行计划树的叶子节点是原始数据，往上会经过各种过滤条件以及其他函数的限制，父节点依赖于子节点。整个过程可以变换为子节点经过特定计算评估父节点的输出，计算出来之后父节点将会作为上一层的子节点往上计算。因此，CBO 可以分解为两步：
+
+1.  一次性计算出原始数据的相关数据  
+    
+2.  再对每类节点制定一种对应的评估规则就可以自下往上评估出所有节点的代价值
+
+**一次性计算出原始表的相关数据**  
+
+这个操作是 CBO 最基础的一项工作，在计算之前，我们需要明确 “相关数据” 是什么？这里给出核心的统计信息如下：
+
+*   estimatedSize: 每个 LogicalPlan 节点输出数据大小（解压）  
+    
+*   rowCount: 每个 LogicalPlan 节点输出数据总条数  
+    
+*   basicStats: 基本列信息，包括列类型、Max、Min、number of nulls, number of distinct values, max column length, average column length 等  
+    
+*   Histograms: Histograms of columns, i.e., equi-width histogram (for numeric and string types) and equi-height histogram (only for numeric types).
+
+至于为什么要统计这么多数据，下文会讲到。现在再来看如何进行统计，有两种比较可行的方案：
+
+1. 打开所有表扫描一遍，这样最简单，而且统计信息准确，缺点是对于大表来说代价比较大。hive 和 impala 目前都采用的这种方式：
+
+（1）hive 统计原始表命令：analyse table ***
+
+（2）impala 统计原始表明了：compute stats ***
+
+2. 针对一些大表，扫描一遍代价太大，可以采用采样（sample）的方式统计计算
+
+**代价评估规则 & 计算所有节点统计信息**
+
+代价评估规则意思是说在当前子节点统计信息的基础上，计算父节点相关统计信息的一套规则。 对于不同谓词节点，评估规则必然不一样，比如 fliter、group by、limit 等等的评估规则不同。 假如现在已经知道表 C 的基本统计信息，对于 SQL： select * from A , B , C where A.id = B.b_id and A.id = C.c_id and C.c_id > N  这个条件，如何评估经过 C.c_id > N 过滤后的基本统计信息。我们来看看：
+
+1. 假设当前已知 C 列的最小值 c_id.Min、最大值 c_id.Max 以及总行数 c_id.Distinct，如下图所示：
+
+![](https://nos.netease.com/cloud-website-bucket/201807191229252e762b81-44a0-4ea6-854c-71da03816b55.png) 
+
+  
+
+2. 现在分别有三种情况需要说明，其一是 N 小于 c_id.Min，其二是 N 大于 c_id.Max，其三是 N 介于 c_id.Min 和 c_id.Max 之间。前两种场景是第三种场景的特殊情况，这里简单的针对第三种场景说明。如下图所示：
+
+![](https://nos.netease.com/cloud-website-bucket/20180719122931bd9ed1ea-c54b-444c-b1a7-6f5c78d350bc.png) 
+
+  
+
+在 C.c_id > N 过滤条件下，c_id.Min 会增大到 N，c_id.Max 保持不变。而过滤后总行数 c_id.distinct(after filter) ＝ (c_id.Max - N) / (c_id.Max - c_id.Min) * c_id.distinct(before filter)
+
+当然，上述计算只是示意性计算，真实算法会复杂很多。另外，如果大家对 group by 、limit 等谓词的评估规则比较感兴趣的话，可以阅读
+
+[SparkSQL CBO 设计文档](https://issues.apache.org/jira/secure/attachment/12823839/Spark_CBO_Design_Spec.pdf)
+
+，在此不再赘述。
+
+至此，通过各种评估规则就可以计算出语法树中所有节点的基本统计信息，当然最重要的是参与 Join 的数据集节点的统计信息。最后只需要根据这些统计信息选择最优的 Join 算法以及 Join 顺序，最终得到最优的物理执行计划。
+
+**Hive - CBO 优化效果**
+
+Hive 本身没有去从头实现一个 SQL 优化器，而是借助于 [Apache Calcite](http://calcite.apache.org/) ，Calcite 是一个开源的、基于 CBO 的企业级 SQL 查询优化框架，目前包括 Hive、Phoniex、Kylin 以及 Flink 等项目都使用了 Calcite 作为其执行优化器，这也很好理解，执行优化器本来就可以抽象成一个系统模块，并没有必要花费大量时间去重复造轮子。
+
+hortonworks 曾经对 Hive 的 CBO 特性做了相关的测试，测试结果认为 CBO 至少对查询有三个重要的影响：Join ordering optimization、Bushy join support 以及 Join simplification，本文只简单介绍一下 Join ordering optimization，有兴趣的同学可以继续阅读[这篇文章](http://hortonworks.com/blog/hive-0-14-cost-based-optimizer-cbo-technical-overview/)来更多地了解其他两个重要影响。（下面数据以及示意图也来自于该篇文章，特此注明）
+
+hortonworks 对 TPCDS 的部分 Query 进行了研究，发现对于大部分星型 \ 雪花模型，都存在多 Join 问题，这些 Join 顺序如果组织不好，性能就会很差，如果组织得当，性能就会很好。比如 Query Q3：  
+
+```
+select
+    dt.d_year,
+    item.i_brand_id brand_id,
+    item.i_brand brand,
+    sum(ss_ext_sales_price) sum_agg
+from
+    date_dim dt,
+    store_sales,
+    item
+where
+    dt.d_date_sk = store_sales.ss_sold_date_sk
+and store_sales.ss_item_sk = item.i_item_sk
+and item.i_manufact_id =436
+and dt.d_moy =12
+groupby dt.d_year , item.i_brand , item.i_brand_id
+order by dt.d_year , sum_agg desc , brand_id
+limit 10
+```
+
+上述 Query 涉及到 3 张表，一张事实表 store_sales（数据量大）和两张维度表（数据量小），三表之间的关系如下图所示：
+
+这里就涉及上文提到的 Join 顺序问题，从原始表来看，date_dime 有 73049 条记录，而 item 有 462000 条记录。很显然，如果没有其他暗示的话，Join 顺序必然是 store_sales join date_time join item。但是，where 条件中还带有两个条件，CBO 会根据过滤条件对过滤后的数据进行评估，结果如下：
+
+<table><tbody><tr><td><p>Table</p></td><td><p>Cardinality</p></td><td><p>Cardinality after filter&nbsp;</p></td><td><p>Selectivity</p></td></tr><tr><td><p>date_dim</p></td><td><p>73,049</p></td><td><p>6200</p></td><td><p>8.5%</p></td></tr><tr><td><p>item</p></td><td><p>462,000</p></td><td><p>484</p></td><td><p>0.1%</p></td></tr></tbody></table>
+
+根据上表所示，过滤后的数据量 item 明显比 date_dim 小的多，剧情反转的有点快。于是乎，经过 CBO 之后 Join 顺序就变成了 store_sales join item join date_time，为了进一步确认，可以在开启 CBO 前后分别记录该 SQL 的执行计划，如下图所示：
+
+![](https://nos.netease.com/cloud-website-bucket/20180719122957e682bf1c-488c-4e7d-8125-bb8817dc294b.png) 
+
+  
+
+左图是未开启 CBO 特性时 Q3 的执行计划，store_sales 先与 date_dim 进行 join，join 后的中间结果数据集有 140 亿条。而再看右图，store_sales 先于 item 进行 join，中间结果只有 8200w 条。很显然，后者执行效率会更高，实践出真知，来看看两者的实际执行时间：
+
+<table><tbody><tr><td>Test</td><td>Query Response Time(seconds)</td><td>Intermediate Rows</td><td>CPU(seconds)</td></tr><tr><td>Q3 CBO OFF</td><td>255</td><td>13,987,506,884</td><td>51,967</td></tr><tr><td>Q3 CBO ON</td><td>142</td><td>86,217,653</td><td>35,036</td></tr></tbody></table>
+
+上图很明显的看出 Q3 在 CBO 的优化下性能将近提升了 1 倍，与此同时，CPU 资源使用率也降低了一半左右。不得不说，TPCDS 中有很多相似的 Query，有兴趣的同学可以深入进一步深入了解。
+
+**Impala - CBO 优化效果**
+
+和 Hive 优化的原理相同，也是针对复杂 join 的执行顺序、Join 的执行策略选择优化等方面进行的优化，本人使用 TPC-DS 对 Impala 在开启 CBO 特性前后的部分 Query 进行了性能测试，测试结果如下图所示：  
+
+![](https://nos.netease.com/cloud-website-bucket/201807191230068ce8d020-5cf7-42d8-8db6-b56ded82df38.png) 
+
+  
+
+参考资料：
+
+本文来自网易实践者社区，经作者范欣欣授权发布。
